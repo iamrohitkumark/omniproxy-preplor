@@ -40,6 +40,17 @@ const POLLINATIONS_MODELS = [
   "deepseek",           // DeepSeek V3
   "openai-fast",        // GPT-4o-mini equivalent (fast)
   "qwen-coder",         // Qwen2.5 Coder 32B
+  "grok",               // Grok (xAI)
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scaleway Generative APIs – FREE tier, NO API KEY for public models
+// Llama3 70B Instruct — OpenAI-compatible endpoint
+// ─────────────────────────────────────────────────────────────────────────────
+const SCALEWAY_ENDPOINT = "https://api.scaleway.ai/v1/chat/completions";
+const SCALEWAY_MODELS = [
+  { model: "llama-3.3-70b-instruct", name: "Scaleway/Llama3.3-70B" },
+  { model: "mistral-nemo-instruct-2407", name: "Scaleway/Mistral-Nemo" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,18 +103,61 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-// ── Call Pollinations.ai (keyless) ────────────────────────────────────────────
-async function callPollinations(model, messages, temperature, maxTokens, jsonMode) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Call Pollinations.ai (keyless, with retry on queue-full) ──────────────────
+async function callPollinations(model, messages, temperature, maxTokens, jsonMode, attempt = 0) {
+  // Random seed spreads load across Pollinations backend workers
+  const seed = Math.floor(Math.random() * 999999);
   const payload = {
     model,
     messages,
     temperature,
     max_tokens: maxTokens,
-    private: true,   // Don't show our prompts in Pollinations public feed
+    seed,
+    private: true,  // Don't expose prompts in Pollinations public feed
   };
   if (jsonMode) payload.response_format = { type: "json_object" };
 
   const resp = await fetch(POLLINATIONS_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(35000),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    const isQueueFull = errText.includes("queue full") || resp.status === 429;
+    // Retry once with delay if queue is full (temporary congestion)
+    if (isQueueFull && attempt === 0) {
+      console.warn(`[OmniProxy] Pollinations/${model} queue full — retrying in 2s...`);
+      await sleep(2000);
+      return callPollinations(model, messages, temperature, maxTokens, jsonMode, 1);
+    }
+    throw new Error(`Pollinations/${model} HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`Pollinations/${model}: empty response`);
+
+  data._provider = `Pollinations/${model}`;
+  return data;
+}
+
+// ── Call Scaleway (keyless free Llama/Mistral) ────────────────────────────────
+async function callScaleway(modelName, displayName, messages, temperature, maxTokens, jsonMode) {
+  const payload = {
+    model: modelName,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  };
+  if (jsonMode) payload.response_format = { type: "json_object" };
+
+  const resp = await fetch(SCALEWAY_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -112,15 +166,13 @@ async function callPollinations(model, messages, temperature, maxTokens, jsonMod
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "");
-    throw new Error(`Pollinations/${model} HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`${displayName} HTTP ${resp.status}: ${errText.slice(0, 200)}`);
   }
 
   const data = await resp.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error(`Pollinations/${model}: empty response`);
+  if (!data?.choices?.[0]?.message?.content) throw new Error(`${displayName}: empty response`);
 
-  // Tag the actual model used
-  data._provider = `Pollinations/${model}`;
+  data._provider = displayName;
   return data;
 }
 
@@ -259,6 +311,20 @@ app.post("/v1/chat/completions", authMiddleware, async (req, res) => {
     } catch (err) {
       console.warn(`[OmniProxy] ✗ Pollinations/${model}: ${err.message}`);
       errors.push({ provider: `Pollinations/${model}`, error: err.message });
+      // Brief pause between model attempts to avoid hammering Pollinations
+      await sleep(300);
+    }
+  }
+
+  // ── Step 2: Try Scaleway free keyless Llama/Mistral ──────────────────────────
+  for (const { model, name } of SCALEWAY_MODELS) {
+    try {
+      const result = await callScaleway(model, name, messages, temperature, max_tokens, jsonMode);
+      console.log(`[OmniProxy] ✓ ${name} responded`);
+      return res.json(result);
+    } catch (err) {
+      console.warn(`[OmniProxy] ✗ ${name}: ${err.message}`);
+      errors.push({ provider: name, error: err.message });
     }
   }
 
