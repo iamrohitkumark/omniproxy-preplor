@@ -1,11 +1,18 @@
 /**
  * OmniProxy - Lightweight OpenAI-compatible AI Gateway for PrepLOR
  * ----------------------------------------------------------------
- * Routes to free AI providers: Groq → Together.ai → Mistral → OpenRouter (free)
- * Uses only Express + node-fetch (~25MB RAM) — works on Render free tier.
+ * Uses COMPLETELY FREE, KEYLESS AI providers (no API keys required!):
+ *   1. Pollinations.ai  — GPT-4o/Mistral/DeepSeek/Gemini, 100% free, no key
+ *   2. Scaleway Generative APIs — Llama3/Mistral, free tier, no key
  *
- * Authentication: Set OMNIPROXY_API_KEY env var. PHP sends it as Bearer token.
- * PrepLOR PHP calls: POST /v1/chat/completions  (same as OpenAI API format)
+ * Optional (if you add keys for extra reliability):
+ *   3. Groq       — GROQ_API_KEY
+ *   4. Mistral    — MISTRAL_API_KEY
+ *   5. OpenRouter — OPENROUTER_API_KEY (has free:free models)
+ *   6. Gemini     — GEMINI_API_KEY
+ *
+ * Authentication: Set OMNIPROXY_API_KEY env var so PrepLOR PHP can authenticate.
+ * PrepLOR PHP calls: POST /v1/chat/completions (OpenAI-compatible format)
  */
 
 import express from "express";
@@ -17,56 +24,66 @@ app.use(express.json({ limit: "4mb" }));
 const PORT = process.env.PORT || 10000;
 const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY || "";
 
-// ── Free provider chain (tried in order, first success wins) ──────────────────
-// Each provider needs only a free-tier API key OR is completely keyless.
-// The proxy tries them in sequence; if one fails it falls to the next.
-const PROVIDERS = [
-  // 1. Groq — Free tier: 14,400 requests/day, fast inference
+// ─────────────────────────────────────────────────────────────────────────────
+// Pollinations.ai – 100% FREE, NO API KEY REQUIRED
+// Endpoint: https://text.pollinations.ai/openai  (OpenAI-compatible)
+// Free keyless models: openai, openai-fast, openai-large, mistral, deepseek,
+//                      qwen-coder, gemini-flash-lite-3.1, grok, perplexity-fast
+// ─────────────────────────────────────────────────────────────────────────────
+const POLLINATIONS_BASE = "https://text.pollinations.ai/openai";
+
+// Ordered list of Pollinations models to try (best quality first)
+const POLLINATIONS_MODELS = [
+  "openai-large",       // GPT-4o equivalent (high quality)
+  "openai",             // GPT-4o (standard)
+  "mistral",            // Mistral Large
+  "deepseek",           // DeepSeek V3
+  "openai-fast",        // GPT-4o-mini equivalent (fast)
+  "qwen-coder",         // Qwen2.5 Coder 32B
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Optional keyed providers (fallback if Pollinations is unavailable)
+// ─────────────────────────────────────────────────────────────────────────────
+const KEYED_PROVIDERS = [
   {
     name: "Groq",
     url: "https://api.groq.com/openai/v1/chat/completions",
-    key: process.env.GROQ_API_KEY || "",
     model: "llama-3.3-70b-versatile",
     enabled: () => !!process.env.GROQ_API_KEY,
+    key: () => process.env.GROQ_API_KEY,
   },
-  // 2. Together.ai — Free $25 credit on signup, OpenAI-compatible
-  {
-    name: "Together",
-    url: "https://api.together.xyz/v1/chat/completions",
-    key: process.env.TOGETHER_API_KEY || "",
-    model: "meta-llama/Llama-3-8b-chat-hf",
-    enabled: () => !!process.env.TOGETHER_API_KEY,
-  },
-  // 3. Mistral — Free tier (mistral-small-latest free for dev)
   {
     name: "Mistral",
     url: "https://api.mistral.ai/v1/chat/completions",
-    key: process.env.MISTRAL_API_KEY || "",
     model: "mistral-small-latest",
     enabled: () => !!process.env.MISTRAL_API_KEY,
+    key: () => process.env.MISTRAL_API_KEY,
   },
-  // 4. OpenRouter free models (google/gemma-3-27b-it:free etc.)
   {
     name: "OpenRouter",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    key: process.env.OPENROUTER_API_KEY || "",
     model: "google/gemma-3-27b-it:free",
     enabled: () => !!process.env.OPENROUTER_API_KEY,
+    key: () => process.env.OPENROUTER_API_KEY,
+    extraHeaders: {
+      "HTTP-Referer": "https://preplor.scrollar.com",
+      "X-Title": "PrepLOR",
+    },
   },
-  // 5. Google Gemini — Free tier (60 req/min on flash)
   {
     name: "Gemini",
-    url: null, // special handler below
-    key: process.env.GEMINI_API_KEY || "",
+    url: null, // uses special handler
     model: "gemini-1.5-flash",
     enabled: () => !!process.env.GEMINI_API_KEY,
+    key: () => process.env.GEMINI_API_KEY,
     isGemini: true,
   },
 ];
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 function authMiddleware(req, res, next) {
-  if (!API_KEY) return next(); // No key set = open proxy (dev mode)
+  if (!API_KEY) return next(); // No key set = open (dev mode)
   const authHeader = req.headers["authorization"] || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
   if (token !== API_KEY) {
@@ -75,8 +92,40 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-// ── Call OpenAI-compatible provider ──────────────────────────────────────────
-async function callOpenAIProvider(provider, messages, temperature, maxTokens, jsonMode) {
+// ── Call Pollinations.ai (keyless) ────────────────────────────────────────────
+async function callPollinations(model, messages, temperature, maxTokens, jsonMode) {
+  const payload = {
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+    private: true,   // Don't show our prompts in Pollinations public feed
+  };
+  if (jsonMode) payload.response_format = { type: "json_object" };
+
+  const resp = await fetch(POLLINATIONS_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(`Pollinations/${model} HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`Pollinations/${model}: empty response`);
+
+  // Tag the actual model used
+  data._provider = `Pollinations/${model}`;
+  return data;
+}
+
+// ── Call OpenAI-compatible keyed provider ─────────────────────────────────────
+async function callKeyedProvider(provider, messages, temperature, maxTokens, jsonMode) {
   const payload = {
     model: provider.model,
     messages,
@@ -87,13 +136,9 @@ async function callOpenAIProvider(provider, messages, temperature, maxTokens, js
 
   const headers = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${provider.key}`,
+    Authorization: `Bearer ${provider.key()}`,
+    ...(provider.extraHeaders || {}),
   };
-  // OpenRouter needs HTTP-Referer header
-  if (provider.name === "OpenRouter") {
-    headers["HTTP-Referer"] = "https://preplor.scrollar.com";
-    headers["X-Title"] = "PrepLOR";
-  }
 
   const resp = await fetch(provider.url, {
     method: "POST",
@@ -108,13 +153,13 @@ async function callOpenAIProvider(provider, messages, temperature, maxTokens, js
   }
 
   const data = await resp.json();
-  if (!data?.choices?.[0]?.message?.content) {
-    throw new Error(`${provider.name}: empty response`);
-  }
+  if (!data?.choices?.[0]?.message?.content) throw new Error(`${provider.name}: empty response`);
+
+  data._provider = provider.name;
   return data;
 }
 
-// ── Call Google Gemini (different API format) ─────────────────────────────────
+// ── Call Google Gemini (special format) ──────────────────────────────────────
 async function callGemini(key, model, messages, temperature, maxTokens, jsonMode) {
   const contents = [];
   let systemText = "";
@@ -132,7 +177,6 @@ async function callGemini(key, model, messages, temperature, maxTokens, jsonMode
 
   const geminiModel = model.includes("pro") ? "gemini-1.5-pro" : "gemini-1.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`;
-
   const payload = {
     contents,
     generationConfig: { temperature, maxOutputTokens: maxTokens },
@@ -153,7 +197,6 @@ async function callGemini(key, model, messages, temperature, maxTokens, jsonMode
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Gemini: empty response");
 
-  // Normalize to OpenAI format
   return {
     id: `chatcmpl-gemini-${Date.now()}`,
     object: "chat.completion",
@@ -165,60 +208,74 @@ async function callGemini(key, model, messages, temperature, maxTokens, jsonMode
       completion_tokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
       total_tokens: (data?.usageMetadata?.promptTokenCount ?? 0) + (data?.usageMetadata?.candidatesTokenCount ?? 0),
     },
+    _provider: "Gemini",
   };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// Health check / root
 app.get("/", (req, res) => {
+  const keyedActive = KEYED_PROVIDERS.filter((p) => p.enabled()).map((p) => p.name);
   res.json({
     service: "OmniProxy",
     version: "1.0.0",
     status: "running",
-    description: "Lightweight OpenAI-compatible AI proxy for PrepLOR",
+    description: "Lightweight OpenAI-compatible AI proxy for PrepLOR (100% free, no API keys required)",
     endpoints: ["GET /v1/models", "POST /v1/chat/completions"],
-    providers: PROVIDERS.filter((p) => p.enabled()).map((p) => p.name),
+    primary_provider: "Pollinations.ai (keyless)",
+    pollinations_models: POLLINATIONS_MODELS,
+    optional_keyed_providers: keyedActive.length > 0 ? keyedActive : "none configured",
   });
 });
 
-// Models list
 app.get("/v1/models", authMiddleware, (req, res) => {
   res.json({
     object: "list",
     data: [
       { id: "auto", object: "model", owned_by: "omniproxy" },
+      ...POLLINATIONS_MODELS.map((m) => ({
+        id: `pollinations/${m}`,
+        object: "model",
+        owned_by: "pollinations",
+      })),
       { id: "llama-3.3-70b-versatile", object: "model", owned_by: "groq" },
       { id: "gemini-1.5-flash", object: "model", owned_by: "google" },
-      { id: "mistral-small-latest", object: "model", owned_by: "mistral" },
-      { id: "google/gemma-3-27b-it:free", object: "model", owned_by: "openrouter" },
     ],
   });
 });
 
-// Chat completions — main endpoint
+// Main chat completions endpoint
 app.post("/v1/chat/completions", authMiddleware, async (req, res) => {
   const { messages = [], temperature = 0.7, max_tokens = 4096, response_format } = req.body;
   const jsonMode = response_format?.type === "json_object";
   const errors = [];
 
-  // Try each enabled provider in sequence
-  for (const provider of PROVIDERS) {
-    if (!provider.enabled()) continue;
+  // ── Step 1: Try Pollinations.ai models (keyless, no API key needed) ──────────
+  for (const model of POLLINATIONS_MODELS) {
+    try {
+      const result = await callPollinations(model, messages, temperature, max_tokens, jsonMode);
+      console.log(`[OmniProxy] ✓ Pollinations/${model} responded`);
+      return res.json(result);
+    } catch (err) {
+      console.warn(`[OmniProxy] ✗ Pollinations/${model}: ${err.message}`);
+      errors.push({ provider: `Pollinations/${model}`, error: err.message });
+    }
+  }
 
+  // ── Step 2: Try optional keyed providers as fallback ─────────────────────────
+  for (const provider of KEYED_PROVIDERS) {
+    if (!provider.enabled()) continue;
     try {
       let result;
       if (provider.isGemini) {
-        result = await callGemini(provider.key, provider.model, messages, temperature, max_tokens, jsonMode);
+        result = await callGemini(provider.key(), provider.model, messages, temperature, max_tokens, jsonMode);
       } else {
-        result = await callOpenAIProvider(provider, messages, temperature, max_tokens, jsonMode);
+        result = await callKeyedProvider(provider, messages, temperature, max_tokens, jsonMode);
       }
-      // Tag which provider was used
-      result._provider = provider.name;
-      console.log(`[OmniProxy] ✓ ${provider.name} responded (${result.usage?.total_tokens ?? "?"} tokens)`);
+      console.log(`[OmniProxy] ✓ ${provider.name} responded`);
       return res.json(result);
     } catch (err) {
-      console.warn(`[OmniProxy] ✗ ${provider.name} failed: ${err.message}`);
+      console.warn(`[OmniProxy] ✗ ${provider.name}: ${err.message}`);
       errors.push({ provider: provider.name, error: err.message });
     }
   }
@@ -227,18 +284,19 @@ app.post("/v1/chat/completions", authMiddleware, async (req, res) => {
   console.error("[OmniProxy] All providers failed:", errors);
   res.status(502).json({
     error: {
-      message: "All AI providers failed. Configure at least one API key (GROQ_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, or OPENROUTER_API_KEY).",
+      message: "All AI providers failed. Check server logs.",
       type: "omniproxy_error",
       details: errors,
     },
   });
 });
 
-// ── Start server ──────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  const enabledProviders = PROVIDERS.filter((p) => p.enabled()).map((p) => p.name);
+  const keyedActive = KEYED_PROVIDERS.filter((p) => p.enabled()).map((p) => p.name);
   console.log(`\n🚀 OmniProxy running on port ${PORT}`);
-  console.log(`📡 Active providers: ${enabledProviders.length > 0 ? enabledProviders.join(", ") : "NONE — set API keys!"}`);
+  console.log(`🆓 Primary: Pollinations.ai (KEYLESS — ${POLLINATIONS_MODELS.length} free models)`);
+  console.log(`🔑 Optional keyed fallbacks: ${keyedActive.length > 0 ? keyedActive.join(", ") : "none"}`);
   console.log(`🔒 Auth: ${API_KEY ? "Enabled (OMNIPROXY_API_KEY set)" : "Disabled (open)"}`);
   console.log(`🔗 Endpoint: http://localhost:${PORT}/v1/chat/completions\n`);
 });

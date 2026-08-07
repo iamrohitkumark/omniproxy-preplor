@@ -1,4 +1,8 @@
 # Render.com Blueprint for OmniProxy AI Gateway
+# ─────────────────────────────────────────────
+# 100% FREE - No API keys required!
+# Uses Pollinations.ai keyless free tier as primary provider.
+# Optional: add GROQ_API_KEY, GEMINI_API_KEY etc. for extra reliability.
 services:
   - type: web
     name: omniproxy-preplor
@@ -12,15 +16,13 @@ services:
         value: 10000
       - key: NODE_ENV
         value: production
-      # ── Your API key to authenticate PHP calls from PrepLOR ──────────────────
-      # Set this in Render Dashboard → Environment (don't hardcode here)
+      # Set this key in Render dashboard so PrepLOR PHP can authenticate
+      # Use any strong random string, e.g.: preplor-ai-2026-xyz
       - key: OMNIPROXY_API_KEY
-        sync: false   # = prompt Render to ask you for the value on first deploy
-      # ── At least ONE AI provider key is required ─────────────────────────────
-      # Groq free tier: https://console.groq.com (recommended — 14,400 req/day free)
-      - key: GROQ_API_KEY
         sync: false
-      # Optional extras (OmniProxy tries them as fallbacks if Groq fails)
+      # ── All below are OPTIONAL — Pollinations.ai works without any keys ──
+      # - key: GROQ_API_KEY
+      #   sync: false
       # - key: GEMINI_API_KEY
       #   sync: false
       # - key: MISTRAL_API_KEY
