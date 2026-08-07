@@ -1,0 +1,29 @@
+# Render.com Blueprint for OmniProxy AI Gateway
+services:
+  - type: web
+    name: omniproxy-preplor
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+      # ── Your API key to authenticate PHP calls from PrepLOR ──────────────────
+      # Set this in Render Dashboard → Environment (don't hardcode here)
+      - key: OMNIPROXY_API_KEY
+        sync: false   # = prompt Render to ask you for the value on first deploy
+      # ── At least ONE AI provider key is required ─────────────────────────────
+      # Groq free tier: https://console.groq.com (recommended — 14,400 req/day free)
+      - key: GROQ_API_KEY
+        sync: false
+      # Optional extras (OmniProxy tries them as fallbacks if Groq fails)
+      # - key: GEMINI_API_KEY
+      #   sync: false
+      # - key: MISTRAL_API_KEY
+      #   sync: false
+      # - key: OPENROUTER_API_KEY
+      #   sync: false
