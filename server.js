@@ -33,10 +33,17 @@ const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY |
 // ─────────────────────────────────────────────────────────────────────────────
 const POLLINATIONS_BASE = "https://text.pollinations.ai/openai";
 
-// Only anonymous (keyless) model as of Aug 2026
+// Pollinations.ai models — keyless (openai-fast) & authenticated (openai-large, mistral, etc.)
 const POLLINATIONS_MODELS = [
-  "openai-fast",   // GPT-OSS 20B (OVH) — fast, capable, completely free
+  "openai-fast",   // GPT-OSS 20B (OVH) — fast, keyless free model
+  "openai",        // GPT-4o (standard)
+  "openai-large",  // GPT-4o (large)
+  "mistral",       // Mistral Large
+  "deepseek",      // DeepSeek V3
+  "qwen-coder",    // Qwen2.5 Coder
+  "claude-hybrid"  // Claude hybrid
 ];
+
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,24 +111,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── Call Pollinations.ai (keyless, with retry on queue-full) ──────────────────
 async function callPollinations(model, messages, temperature, maxTokens, jsonMode, attempt = 0) {
-  // Random seed spreads load across Pollinations backend workers
-  const seed = Math.floor(Math.random() * 999999);
   const payload = {
     model,
     messages,
     temperature,
     max_tokens: maxTokens,
-    seed,
-    private: true,  // Don't expose prompts in Pollinations public feed
+    // NOTE: Do NOT add 'private: true' here — Pollinations requires auth for private mode
+    // NOTE: Do NOT add 'seed' here — can trigger unexpected rate limiting
   };
   if (jsonMode) payload.response_format = { type: "json_object" };
 
+  const headers = { "Content-Type": "application/json" };
+  const polKey = process.env.POLLINATIONS_API_KEY || process.env.POLLINATIONS_KEY || "";
+  if (polKey) {
+    headers["Authorization"] = `Bearer ${polKey}`;
+  }
+
   const resp = await fetch(POLLINATIONS_BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(35000),
   });
+
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "");
