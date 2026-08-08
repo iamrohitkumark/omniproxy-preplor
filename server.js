@@ -25,23 +25,19 @@ const PORT = process.env.PORT || 10000;
 const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY || "";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pollinations.ai – 100% FREE, NO API KEY REQUIRED
-// Endpoint: https://text.pollinations.ai/openai  (OpenAI-compatible)
-// Free keyless models: openai, openai-fast, openai-large, mistral, deepseek,
-//                      qwen-coder, gemini-flash-lite-3.1, grok, perplexity-fast
+// Pollinations.ai – FREE Keyless Tier (NO API KEY NEEDED)
+// NOTE: As of Aug 2026, Pollinations deprecated their legacy model list.
+// Only 'openai-fast' (GPT-OSS 20B by OVH) remains available anonymously.
+// All other models (openai, mistral, deepseek, etc.) now require a paid key.
+// Model list: GET https://text.pollinations.ai/models  (tier=anonymous)
 // ─────────────────────────────────────────────────────────────────────────────
 const POLLINATIONS_BASE = "https://text.pollinations.ai/openai";
 
-// Ordered list of Pollinations models to try (best quality first)
+// Only anonymous (keyless) model as of Aug 2026
 const POLLINATIONS_MODELS = [
-  "openai-large",       // GPT-4o equivalent (high quality)
-  "openai",             // GPT-4o (standard)
-  "mistral",            // Mistral Large
-  "deepseek",           // DeepSeek V3
-  "openai-fast",        // GPT-4o-mini equivalent (fast)
-  "qwen-coder",         // Qwen2.5 Coder 32B
-  "grok",               // Grok (xAI)
+  "openai-fast",   // GPT-OSS 20B (OVH) — fast, capable, completely free
 ];
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scaleway Generative APIs – FREE tier, NO API KEY for public models
