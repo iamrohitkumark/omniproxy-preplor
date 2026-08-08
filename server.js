@@ -48,7 +48,8 @@ const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY |
 // All other models (openai, mistral, deepseek, etc.) now require a paid key.
 // Model list: GET https://text.pollinations.ai/models  (tier=anonymous)
 // ─────────────────────────────────────────────────────────────────────────────
-const POLLINATIONS_BASE = "https://text.pollinations.ai/v1/chat/completions";
+const POLLINATIONS_BASE = "https://gen.pollinations.ai/v1/chat/completions";
+
 
 // Default keyless model
 const POLLINATIONS_MODELS = [
