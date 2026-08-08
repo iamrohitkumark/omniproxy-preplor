@@ -17,12 +17,29 @@
 
 import express from "express";
 import fetch from "node-fetch";
+import fs from "fs";
+
+// Load .env file if present
+if (fs.existsSync(".env")) {
+  const envLines = fs.readFileSync(".env", "utf8").split("\n");
+  for (const line of envLines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx > 0) {
+      const k = trimmed.slice(0, eqIdx).trim();
+      const v = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+      process.env[k] = v;
+    }
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
 
 const PORT = process.env.PORT || 10000;
 const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY || "";
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pollinations.ai – FREE Keyless Tier (NO API KEY NEEDED)
@@ -31,18 +48,13 @@ const API_KEY = process.env.OMNIPROXY_API_KEY || process.env.OMNIROUTE_API_KEY |
 // All other models (openai, mistral, deepseek, etc.) now require a paid key.
 // Model list: GET https://text.pollinations.ai/models  (tier=anonymous)
 // ─────────────────────────────────────────────────────────────────────────────
-const POLLINATIONS_BASE = "https://text.pollinations.ai/openai";
+const POLLINATIONS_BASE = "https://text.pollinations.ai/v1/chat/completions";
 
-// Pollinations.ai models — keyless (openai-fast) & authenticated (openai-large, mistral, etc.)
+// Default keyless model
 const POLLINATIONS_MODELS = [
   "openai-fast",   // GPT-OSS 20B (OVH) — fast, keyless free model
-  "openai",        // GPT-4o (standard)
-  "openai-large",  // GPT-4o (large)
-  "mistral",       // Mistral Large
-  "deepseek",      // DeepSeek V3
-  "qwen-coder",    // Qwen2.5 Coder
-  "claude-hybrid"  // Claude hybrid
 ];
+
 
 
 

@@ -31,7 +31,8 @@ echo  Waiting for OmniProxy to boot...
 timeout /t 3 /nobreak >nul
 
 echo  [2/3] Starting ngrok tunnel (static free URL)...
-start "ngrok - Public Tunnel" cmd /k "%~dp0ngrok.exe http 10000"
+start "ngrok - Public Tunnel" cmd /k "%~dp0ngrok.exe http 10000 --url=payer-ether-unfiled.ngrok-free.dev"
+
 
 echo  Waiting for tunnel to establish...
 timeout /t 3 /nobreak >nul
