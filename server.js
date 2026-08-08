@@ -73,11 +73,26 @@ const SCALEWAY_MODELS = [
 // ─────────────────────────────────────────────────────────────────────────────
 const KEYED_PROVIDERS = [
   {
+    name: "Pollinations (Keyed)",
+    url: "https://text.pollinations.ai/v1/chat/completions",
+    model: "openai-large",
+    enabled: () => !!process.env.POLLINATIONS_API_KEY,
+    key: () => process.env.POLLINATIONS_API_KEY,
+  },
+  {
     name: "Groq",
     url: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
     enabled: () => !!process.env.GROQ_API_KEY,
     key: () => process.env.GROQ_API_KEY,
+  },
+  {
+    name: "Gemini",
+    url: null, // uses special handler
+    model: "gemini-1.5-flash",
+    enabled: () => !!process.env.GEMINI_API_KEY,
+    key: () => process.env.GEMINI_API_KEY,
+    isGemini: true,
   },
   {
     name: "Mistral",
@@ -97,15 +112,8 @@ const KEYED_PROVIDERS = [
       "X-Title": "PrepLOR",
     },
   },
-  {
-    name: "Gemini",
-    url: null, // uses special handler
-    model: "gemini-1.5-flash",
-    enabled: () => !!process.env.GEMINI_API_KEY,
-    key: () => process.env.GEMINI_API_KEY,
-    isGemini: true,
-  },
 ];
+
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 function authMiddleware(req, res, next) {
