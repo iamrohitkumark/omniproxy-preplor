@@ -331,33 +331,7 @@ app.post("/v1/chat/completions", authMiddleware, async (req, res) => {
   const jsonMode = response_format?.type === "json_object";
   const errors = [];
 
-  // ── Step 1: Try Pollinations.ai models (keyless, no API key needed) ──────────
-  for (const model of POLLINATIONS_MODELS) {
-    try {
-      const result = await callPollinations(model, messages, temperature, max_tokens, jsonMode);
-      console.log(`[OmniProxy] ✓ Pollinations/${model} responded`);
-      return res.json(result);
-    } catch (err) {
-      console.warn(`[OmniProxy] ✗ Pollinations/${model}: ${err.message}`);
-      errors.push({ provider: `Pollinations/${model}`, error: err.message });
-      // Brief pause between model attempts to avoid hammering Pollinations
-      await sleep(300);
-    }
-  }
-
-  // ── Step 2: Try Scaleway free keyless Llama/Mistral ──────────────────────────
-  for (const { model, name } of SCALEWAY_MODELS) {
-    try {
-      const result = await callScaleway(model, name, messages, temperature, max_tokens, jsonMode);
-      console.log(`[OmniProxy] ✓ ${name} responded`);
-      return res.json(result);
-    } catch (err) {
-      console.warn(`[OmniProxy] ✗ ${name}: ${err.message}`);
-      errors.push({ provider: name, error: err.message });
-    }
-  }
-
-  // ── Step 2: Try optional keyed providers as fallback ─────────────────────────
+  // ── Step 1: Try configured keyed providers FIRST (Groq, Gemini, etc.) ─────────
   for (const provider of KEYED_PROVIDERS) {
     if (!provider.enabled()) continue;
     try {
@@ -374,6 +348,32 @@ app.post("/v1/chat/completions", authMiddleware, async (req, res) => {
       errors.push({ provider: provider.name, error: err.message });
     }
   }
+
+  // ── Step 2: Fallback to Pollinations.ai (keyless) ────────────────────────────
+  for (const model of POLLINATIONS_MODELS) {
+    try {
+      const result = await callPollinations(model, messages, temperature, max_tokens, jsonMode);
+      console.log(`[OmniProxy] ✓ Pollinations/${model} responded`);
+      return res.json(result);
+    } catch (err) {
+      console.warn(`[OmniProxy] ✗ Pollinations/${model}: ${err.message}`);
+      errors.push({ provider: `Pollinations/${model}`, error: err.message });
+      await sleep(300);
+    }
+  }
+
+  // ── Step 3: Fallback to Scaleway ──────────────────────────────────────────────
+  for (const { model, name } of SCALEWAY_MODELS) {
+    try {
+      const result = await callScaleway(model, name, messages, temperature, max_tokens, jsonMode);
+      console.log(`[OmniProxy] ✓ ${name} responded`);
+      return res.json(result);
+    } catch (err) {
+      console.warn(`[OmniProxy] ✗ ${name}: ${err.message}`);
+      errors.push({ provider: name, error: err.message });
+    }
+  }
+
 
   // All providers failed
   console.error("[OmniProxy] All providers failed:", errors);
